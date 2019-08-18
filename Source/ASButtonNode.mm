@@ -41,7 +41,7 @@
     _contentEdgeInsets = UIEdgeInsetsZero;
     _imageAlignment = ASButtonNodeImageAlignmentBeginning;
     self.accessibilityTraits = self.defaultAccessibilityTraits;
-
+    
     [self updateYogaLayoutIfNeeded];
   }
   return self;
@@ -52,12 +52,15 @@
   ASLockScopeSelf();
   if (!_titleNode) {
     _titleNode = [[ASTextNode alloc] init];
-#if TARGET_OS_IOS 
+    #if TARGET_OS_TV
       // tvOS needs access to the underlying view
       // of the button node to add a touch handler.
-    [_titleNode setLayerBacked:YES];
-#endif
+      [_titleNode setLayerBacked:NO];
+    #else
+      [_titleNode setLayerBacked:YES];
+    #endif
     _titleNode.style.flexShrink = 1.0;
+    _titleNode.textColorFollowsTintColor = YES;
   }
   return _titleNode;
 }
@@ -129,6 +132,17 @@
   [self.backgroundImageNode setDisplaysAsynchronously:displaysAsynchronously];
   [self.imageNode setDisplaysAsynchronously:displaysAsynchronously];
   [self.titleNode setDisplaysAsynchronously:displaysAsynchronously];
+}
+
+-(void)tintColorDidChange
+{
+  [super tintColorDidChange];
+  // UIButton documentation states that it tints the image and title of buttons when tintColor is set.
+  // | "The tint color to apply to the button title and image."
+  // | From: https://developer.apple.com/documentation/uikit/uibutton/1624025-tintcolor
+  UIColor *tintColor = self.tintColor;
+  self.imageNode.tintColor = tintColor;
+  self.titleNode.tintColor = tintColor;
 }
 
 - (void)updateImage
@@ -301,12 +315,14 @@
 #if TARGET_OS_IOS
 - (void)setTitle:(NSString *)title withFont:(UIFont *)font withColor:(UIColor *)color forState:(UIControlState)state
 {
-  NSDictionary *attributes = @{
-    NSFontAttributeName: font ? : [UIFont systemFontOfSize:[UIFont buttonFontSize]],
-    NSForegroundColorAttributeName : color ? : [UIColor blackColor]
-  };
-    
-  NSAttributedString *string = [[NSAttributedString alloc] initWithString:title attributes:attributes];
+  NSMutableDictionary *attributes = [NSMutableDictionary dictionary];
+  attributes[NSFontAttributeName] = font ? : [UIFont systemFontOfSize:[UIFont buttonFontSize]];
+  if (color != nil) {
+    // From apple's documentation: If color is not specified, NSForegroundColorAttributeName will fallback to black
+    // Only set if the color is nonnull
+    attributes[NSForegroundColorAttributeName] = color;
+  }
+  NSAttributedString *string = [[NSAttributedString alloc] initWithString:title attributes:[attributes copy]];
   [self setAttributedTitle:string forState:state];
 }
 #endif

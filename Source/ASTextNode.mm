@@ -209,6 +209,7 @@ static ASTextKitRenderer *rendererForAttributes(ASTextKitAttributes attributes, 
   ASTextNodeHighlightStyle _highlightStyle;
   BOOL _longPressCancelsTouches;
   BOOL _passthroughNonlinkTouches;
+  BOOL _alwaysHandleTruncationTokenTap;
 }
 @dynamic placeholderEnabled;
 
@@ -251,6 +252,10 @@ static NSArray *DefaultLinkAttributeNames() {
     // on the special placeholder behavior of ASTextNode.
     _placeholderColor = ASDisplayNodeDefaultPlaceholderColor();
     _placeholderInsets = UIEdgeInsetsMake(1.0, 0.0, 1.0, 0.0);
+
+    // Tint color is applied when text nodes are within controls and indicate user action
+    // Most text nodes do not require interaction and this matches the default value of UILabel
+    _textColorFollowsTintColor = NO;
   }
 
   return self;
@@ -376,7 +381,8 @@ static NSArray *DefaultLinkAttributeNames() {
     .shadowOffset = _shadowOffset,
     .shadowColor = _cachedShadowUIColor,
     .shadowOpacity = _shadowOpacity,
-    .shadowRadius = _shadowRadius
+    .shadowRadius = _shadowRadius,
+    .tintColor = self.textColorFollowsTintColor ? self.tintColor : nil
   };
 }
 
@@ -570,7 +576,8 @@ static NSArray *DefaultLinkAttributeNames() {
       [backgroundColor setFill];
       UIRectFillUsingBlendMode(CGContextGetClipBoundingBox(context), kCGBlendModeCopy);
     }
-    
+
+
     // Draw text
     [renderer drawInContext:context bounds:drawParameter->_bounds];
     CGContextRestoreGState(context);
@@ -992,9 +999,14 @@ static CGRect ASTextNodeAdjustRenderRectForShadowPadding(CGRect rendererRect, UI
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event
 {
   ASDisplayNodeAssertMainThread();
-  
+  ASLockScopeSelf(); // Protect usage of _passthroughNonlinkTouches and _alwaysHandleTruncationTokenTap ivars.
+
   if (!_passthroughNonlinkTouches) {
     return [super pointInside:point withEvent:event];
+  }
+
+  if (_alwaysHandleTruncationTokenTap) {
+    return YES;
   }
 
   NSRange range = NSMakeRange(0, 0);
@@ -1130,6 +1142,18 @@ static CGRect ASTextNodeAdjustRenderRectForShadowPadding(CGRect rendererRect, UI
   ASLockScopeSelf();
   
   return [_highlightedLinkAttributeName isEqualToString:ASTextNodeTruncationTokenAttributeName];
+}
+
+- (BOOL)alwaysHandleTruncationTokenTap
+{
+  ASLockScopeSelf();
+  return _alwaysHandleTruncationTokenTap;
+}
+
+- (void)setAlwaysHandleTruncationTokenTap:(BOOL)alwaysHandleTruncationTokenTap
+{
+  ASLockScopeSelf();
+  _alwaysHandleTruncationTokenTap = alwaysHandleTruncationTokenTap;
 }
 
 #pragma mark - Shadow Properties

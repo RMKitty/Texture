@@ -13,7 +13,6 @@
 #import <AsyncDisplayKit/ASInternalHelpers.h>
 #import <AsyncDisplayKit/ASDisplayNodeInternal.h>
 #import <AsyncDisplayKit/ASDisplayNode+Subclasses.h>
-#import <AsyncDisplayKit/ASDisplayNode+FrameworkPrivate.h>
 #import <AsyncDisplayKit/ASPendingStateController.h>
 
 /**
@@ -795,16 +794,40 @@ if (shouldApply) { _layer.layerProperty = (layerValueExpr); } else { ASDisplayNo
 
 - (UIColor *)tintColor
 {
-  _bridge_prologue_read;
-  ASDisplayNodeAssert(!_flags.layerBacked, @"Danger: this property is undefined on layer-backed nodes.");
-  return _getFromViewOnly(tintColor);
+  __instanceLock__.lock();
+  UIColor *retVal = nil;
+  BOOL shouldAscend = NO;
+  if (_flags.layerBacked) {
+    retVal = _tintColor;
+    // The first nondefault tint color value in the node’s hierarchy, ascending from and starting with the node itself.
+    shouldAscend = (retVal == nil);
+  } else {
+    ASDisplayNodeAssertThreadAffinity(self);
+    retVal = _getFromViewOnly(tintColor);
+  }
+  __instanceLock__.unlock();
+  return shouldAscend ? self.supernode.tintColor : retVal;
 }
 
 - (void)setTintColor:(UIColor *)color
 {
-  _bridge_prologue_write;
-  ASDisplayNodeAssert(!_flags.layerBacked, @"Danger: this property is undefined on layer-backed nodes.");
-  _setToViewOnly(tintColor, color);
+  // Handle locking manually since we unlock to notify subclasses when tint color changes
+  __instanceLock__.lock();
+  if (_flags.layerBacked) {
+    if (![_tintColor isEqual:color]) {
+      _tintColor = color;
+
+      if (_loaded(self)) {
+        // Tint color has changed. Unlock here before calling subclasses and exit-early
+        __instanceLock__.unlock();
+        [self tintColorDidChange];
+        return;
+      }
+    }
+  } else {
+    _setToViewOnly(tintColor, color);
+  }
+  __instanceLock__.unlock();
 }
 
 - (void)tintColorDidChange

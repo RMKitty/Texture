@@ -530,7 +530,6 @@ ASSynthesizeLockingMethodsWithMutex(__instanceLock__);
 - (void)_locked_loadViewOrLayer
 {
   DISABLED_ASAssertLocked(__instanceLock__);
-  
   if (_flags.layerBacked) {
     TIME_SCOPED(_debugTimeToCreateView);
     _layer = [self _locked_layerToLoad];

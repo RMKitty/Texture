@@ -20,15 +20,9 @@
 #import <AsyncDisplayKit/ASHighlightOverlayLayer.h>
 
 #import <AsyncDisplayKit/ASTextKitRenderer+Positioning.h>
-#import <AsyncDisplayKit/ASTextKitShadower.h>
 #import <AsyncDisplayKit/ASEqualityHelpers.h>
 
-#import <AsyncDisplayKit/ASInternalHelpers.h>
-
-#import <AsyncDisplayKit/CoreGraphics+ASConvenience.h>
-#import <AsyncDisplayKit/ASObjectDescriptionHelpers.h>
 #import <AsyncDisplayKit/ASTextLayout.h>
-#import <AsyncDisplayKit/ASThread.h>
 
 @interface ASTextCacheValue : NSObject {
   @package
@@ -177,6 +171,7 @@ static NSString *ASTextNodeTruncationTokenAttributeName = @"ASTextNodeTruncation
   ASTextNodeHighlightStyle _highlightStyle;
   BOOL _longPressCancelsTouches;
   BOOL _passthroughNonlinkTouches;
+  BOOL _alwaysHandleTruncationTokenTap;
 }
 @dynamic placeholderEnabled;
 
@@ -515,6 +510,19 @@ static NSArray *DefaultLinkAttributeNames() {
     shadow.shadowOffset = _shadowOffset;
     shadow.shadowBlurRadius = _shadowRadius;
     [attributedString addAttribute:NSShadowAttributeName value:shadow range:NSMakeRange(0, attributedString.length)];
+  }
+
+  // Apply tint color if needed and foreground color is not already specified
+  if (self.textColorFollowsTintColor && attributedString.length > 0) {
+    // Apply tint color if specified and if foreground color is undefined for attributedString
+    NSRange limit = NSMakeRange(0, attributedString.length);
+    // Look for previous attributes that define foreground color
+    UIColor *attributeValue = (UIColor *)[attributedString attribute:NSForegroundColorAttributeName atIndex:limit.location effectiveRange:NULL];
+    UIColor *tintColor = self.tintColor;
+    if (attributeValue == nil && tintColor) {
+      // None are found, apply tint color if available. Fallback to "black" text color
+      [attributedString addAttributes:@{ NSForegroundColorAttributeName : tintColor } range:limit];
+    }
   }
 }
 
@@ -967,9 +975,14 @@ static CGRect ASTextNodeAdjustRenderRectForShadowPadding(CGRect rendererRect, UI
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event
 {
   ASDisplayNodeAssertMainThread();
-  
+  ASLockScopeSelf(); // Protect usage of _passthroughNonlinkTouches and _alwaysHandleTruncationTokenTap ivars.
+
   if (!_passthroughNonlinkTouches) {
     return [super pointInside:point withEvent:event];
+  }
+
+  if (_alwaysHandleTruncationTokenTap) {
+    return YES;
   }
   
   NSRange range = NSMakeRange(0, 0);
@@ -1117,6 +1130,18 @@ static CGRect ASTextNodeAdjustRenderRectForShadowPadding(CGRect rendererRect, UI
   return [ASLockedSelf(_highlightedLinkAttributeName) isEqualToString:ASTextNodeTruncationTokenAttributeName];
 }
 
+- (BOOL)alwaysHandleTruncationTokenTap
+{
+  ASLockScopeSelf();
+  return _alwaysHandleTruncationTokenTap;
+}
+
+- (void)setAlwaysHandleTruncationTokenTap:(BOOL)alwaysHandleTruncationTokenTap
+{
+  ASLockScopeSelf();
+  _alwaysHandleTruncationTokenTap = alwaysHandleTruncationTokenTap;
+}
+  
 #pragma mark - Shadow Properties
 
 /**
