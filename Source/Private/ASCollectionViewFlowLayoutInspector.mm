@@ -11,6 +11,7 @@
 #import <AsyncDisplayKit/ASCollectionView.h>
 #import <AsyncDisplayKit/ASEqualityHelpers.h>
 #import <AsyncDisplayKit/ASCollectionNode.h>
+#import <AsyncDisplayKit/ASCollectionView+Undeprecated.h>
 
 #define kDefaultItemSize CGSizeMake(50, 50)
 
@@ -33,7 +34,7 @@
 
 #pragma mark Lifecycle
 
-- (instancetype)initWithFlowLayout:(UICollectionViewFlowLayout *)flowLayout;
+- (instancetype)initWithFlowLayout:(UICollectionViewFlowLayout *)flowLayout
 {
   NSParameterAssert(flowLayout);
   
@@ -46,7 +47,7 @@
 
 #pragma mark ASCollectionViewLayoutInspecting
 
-- (void)didChangeCollectionViewDelegate:(id<ASCollectionDelegate>)delegate;
+- (void)didChangeCollectionViewDelegate:(id<ASCollectionDelegate>)delegate
 {
   if (delegate == nil) {
     memset(&_delegateFlags, 0, sizeof(_delegateFlags));

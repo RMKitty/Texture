@@ -11,6 +11,18 @@
 
 #import <AsyncDisplayKit/AsyncDisplayKit.h>
 
+#if AS_AT_LEAST_IOS13
+static UIImage* makeImageWithColor(UIColor *color, CGSize size) {
+  CGRect rect = CGRect{.origin = CGPointZero, .size = size};
+  UIGraphicsBeginImageContextWithOptions(size, false, 0);
+  [color setFill];
+  UIRectFill(rect);
+  UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
+  UIGraphicsEndImageContext();
+  return image;
+}
+#endif
+
 @interface ASImageNodeSnapshotTests : ASSnapshotTestCase
 @end
 
@@ -25,6 +37,14 @@
 - (UIImage *)testImage
 {
   NSString *path = [[NSBundle bundleForClass:[self class]] pathForResource:@"logo-square"
+                                                                    ofType:@"png"
+                                                               inDirectory:@"TestResources"];
+  return [UIImage imageWithContentsOfFile:path];
+}
+
+- (UIImage *)testGrayscaleImage
+{
+  NSString *path = [[NSBundle bundleForClass:[self class]] pathForResource:@"logo-square-black"
                                                                     ofType:@"png"
                                                                inDirectory:@"TestResources"];
   return [UIImage imageWithContentsOfFile:path];
@@ -67,6 +87,25 @@
 - (void)testTintColorOnNodePropertyAlwaysTemplate
 {
   UIImage *test = [self testImage];
+  ASImageNode *node = [[ASImageNode alloc] init];
+  node.image = [test imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+  node.tintColor = UIColor.redColor;
+  ASDisplayNodeSizeToFitSize(node, test.size);
+  // Tint color should change view
+  ASSnapshotVerifyNode(node, @"red_tint");
+
+  node.tintColor = UIColor.blueColor;
+  // Tint color should change view
+  ASSnapshotVerifyNode(node, @"blue_tint");
+}
+
+- (void)testTintColorOnGrayscaleNodePropertyAlwaysTemplate
+{
+  ASConfiguration *config = [ASConfiguration new];
+  config.experimentalFeatures = ASExperimentalDrawingGlobal;
+  [ASConfigurationManager test_resetWithConfiguration:config];
+
+  UIImage *test = [self testGrayscaleImage];
   ASImageNode *node = [[ASImageNode alloc] init];
   node.image = [test imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
   node.tintColor = UIColor.redColor;
@@ -155,11 +194,90 @@
   UIRectFill(CGRectMake(0, 0, 100, 100));
   UIImage *result = UIGraphicsGetImageFromCurrentImageContext();
   UIGraphicsEndImageContext();
-  UIImage *rounded = ASImageNodeRoundBorderModificationBlock(2, [UIColor redColor])(result);
+  
+  ASPrimitiveTraitCollection traitCollection;
+  
+  if (@available(iOS 13.0, *)) {
+    traitCollection = ASPrimitiveTraitCollectionFromUITraitCollection(UITraitCollection.currentTraitCollection);
+  } else {
+    traitCollection = ASPrimitiveTraitCollectionMakeDefault();
+  }
+  
+  UIImage *rounded = ASImageNodeRoundBorderModificationBlock(2, [UIColor redColor])(result, traitCollection);
   ASImageNode *node = [[ASImageNode alloc] init];
   node.image = rounded;
   ASDisplayNodeSizeToFitSize(node, rounded.size);
   ASSnapshotVerifyNode(node, nil);
 }
 
+- (void)testTintColorBlock
+{
+  UIGraphicsBeginImageContext(CGSizeMake(100, 100));
+  [[UIColor blueColor] setFill];
+  UIRectFill(CGRectMake(0, 0, 100, 100));
+  UIImage *result = UIGraphicsGetImageFromCurrentImageContext();
+  UIGraphicsEndImageContext();
+  
+  UIImage *rounded = ASImageNodeTintColorModificationBlock([UIColor redColor])(result, ASPrimitiveTraitCollectionMakeDefault());
+  ASImageNode *node = [[ASImageNode alloc] init];
+  node.image = rounded;
+  ASDisplayNodeSizeToFitSize(node, rounded.size);
+  ASSnapshotVerifyNode(node, nil);
+}
+
+- (void)testUIGraphicsRendererDrawingExperiment
+{
+  // Test to ensure that rendering with UIGraphicsRenderer don't regress
+  ASConfiguration *config = [ASConfiguration new];
+  config.experimentalFeatures = ASExperimentalDrawingGlobal;
+  [ASConfigurationManager test_resetWithConfiguration:config];
+
+  ASImageNode *imageNode = [[ASImageNode alloc] init];
+  imageNode.image = [self testImage];
+  ASDisplayNodeSizeToFitSize(imageNode, CGSizeMake(100, 100));
+  ASSnapshotVerifyNode(imageNode, nil);
+}
+
+#if AS_AT_LEAST_IOS13
+- (void)testDynamicAssetImage
+{
+  if (@available(iOS 13.0, *)) {
+    UIImage *image = [UIImage imageNamed:@"light-dark" inBundle:[NSBundle bundleForClass:[self class]] compatibleWithTraitCollection:nil];
+    ASImageNode *node = [[ASImageNode alloc] init];
+    node.image = image;
+    ASDisplayNodeSizeToFitSize(node, image.size);
+
+    [[UITraitCollection traitCollectionWithUserInterfaceStyle:UIUserInterfaceStyleLight] performAsCurrentTraitCollection:^{
+      ASSnapshotVerifyNode(node, @"user_interface_style_light");
+    }];
+
+    [[UITraitCollection traitCollectionWithUserInterfaceStyle:UIUserInterfaceStyleDark] performAsCurrentTraitCollection:^{
+      ASSnapshotVerifyNode(node, @"user_interface_style_dark");
+    }];
+  }
+}
+
+- (void)testDynamicTintColor
+{
+  if (@available(iOS 13.0, *)) {
+    UIImage *image = makeImageWithColor(UIColor.redColor, CGSize{.width =  100, .height = 100});
+    image = [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    UIColor* tintColor = UIColor.systemBackgroundColor;
+    ASImageNode *node = [[ASImageNode alloc] init];
+    
+    node.image = image;
+    node.tintColor = tintColor;
+    
+    ASDisplayNodeSizeToFitSize(node, image.size);
+
+    [[UITraitCollection traitCollectionWithUserInterfaceStyle:UIUserInterfaceStyleLight] performAsCurrentTraitCollection:^{
+      ASSnapshotVerifyNode(node, @"user_interface_style_light");
+    }];
+
+    [[UITraitCollection traitCollectionWithUserInterfaceStyle:UIUserInterfaceStyleDark] performAsCurrentTraitCollection:^{
+      ASSnapshotVerifyNode(node, @"user_interface_style_dark");
+    }];
+  }
+}
+#endif // #if AS_AT_LEAST_IOS13
 @end

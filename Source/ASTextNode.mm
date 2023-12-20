@@ -115,7 +115,7 @@ static NSCache *sharedRendererCache()
  we maintain a LRU renderer cache that is queried via a unique key based on text kit attributes and constrained size. 
  */
 
-static ASTextKitRenderer *rendererForAttributes(ASTextKitAttributes attributes, CGSize constrainedSize)
+static ASTextKitRenderer *_rendererForAttributes(ASTextKitAttributes attributes, CGSize constrainedSize)
 {
   NSCache *cache = sharedRendererCache();
   
@@ -130,6 +130,23 @@ static ASTextKitRenderer *rendererForAttributes(ASTextKitAttributes attributes, 
   return renderer;
 }
 
+static AS::RecursiveMutex __sharedRendererCacheInstanceLock__;
+
+static ASTextKitRenderer *rendererForAttributes(ASTextKitAttributes attributes, CGSize constrainedSize)
+{
+  BOOL neverCache = ASActivateExperimentalFeature(ASExperimentalNoTextRendererCache);
+  if (neverCache) {
+    return [[ASTextKitRenderer alloc] initWithTextKitAttributes:attributes constrainedSize:constrainedSize];
+  }
+  
+  BOOL lockCache = ASActivateExperimentalFeature(ASExperimentalLockTextRendererCache);
+  if (lockCache) {
+    AS::MutexLocker l(__sharedRendererCacheInstanceLock__);
+    return _rendererForAttributes(attributes, constrainedSize);
+  }
+  return _rendererForAttributes(attributes, constrainedSize);
+}
+
 #pragma mark - ASTextNodeDrawParameter
 
 @interface ASTextNodeDrawParameter : NSObject {
@@ -140,6 +157,9 @@ static ASTextKitRenderer *rendererForAttributes(ASTextKitAttributes attributes, 
   CGFloat _contentScale;
   BOOL _opaque;
   CGRect _bounds;
+  ASPrimitiveTraitCollection _traitCollection;
+  ASDisplayNodeContextModifier _willDisplayNodeContentWithRenderingContext;
+  ASDisplayNodeContextModifier _didDisplayNodeContentWithRenderingContext;
 }
 @end
 
@@ -151,6 +171,9 @@ static ASTextKitRenderer *rendererForAttributes(ASTextKitAttributes attributes, 
                               contentScale:(CGFloat)contentScale
                                     opaque:(BOOL)opaque
                                     bounds:(CGRect)bounds
+                           traitCollection:(ASPrimitiveTraitCollection)traitCollection
+willDisplayNodeContentWithRenderingContext:(ASDisplayNodeContextModifier)willDisplayNodeContentWithRenderingContext
+ didDisplayNodeContentWithRenderingContext:(ASDisplayNodeContextModifier)didDisplayNodeContentWithRenderingContext
 {
   self = [super init];
   if (self != nil) {
@@ -160,6 +183,9 @@ static ASTextKitRenderer *rendererForAttributes(ASTextKitAttributes attributes, 
     _contentScale = contentScale;
     _opaque = opaque;
     _bounds = bounds;
+    _traitCollection = traitCollection;
+    _willDisplayNodeContentWithRenderingContext = willDisplayNodeContentWithRenderingContext;
+    _didDisplayNodeContentWithRenderingContext = didDisplayNodeContentWithRenderingContext;
   }
   return self;
 }
@@ -183,6 +209,7 @@ static ASTextKitRenderer *rendererForAttributes(ASTextKitAttributes attributes, 
   CGSize _shadowOffset;
   CGColorRef _shadowColor;
   UIColor *_cachedShadowUIColor;
+  UIColor *_cachedTintColor;
   UIColor *_placeholderColor;
   CGFloat _shadowOpacity;
   CGFloat _shadowRadius;
@@ -382,7 +409,7 @@ static NSArray *DefaultLinkAttributeNames() {
     .shadowColor = _cachedShadowUIColor,
     .shadowOpacity = _shadowOpacity,
     .shadowRadius = _shadowRadius,
-    .tintColor = self.textColorFollowsTintColor ? self.tintColor : nil
+    .tintColor = _cachedTintColor
   };
 }
 
@@ -542,14 +569,23 @@ static NSArray *DefaultLinkAttributeNames() {
 
 - (NSObject *)drawParametersForAsyncLayer:(_ASDisplayLayer *)layer
 {
+  /// have to access tintColor outside of the lock to prevent dead lock when accessing up the view hierarchy
+  UIColor *tintColor = self.tintColor;
   ASLockScopeSelf();
-  
+  if (_textColorFollowsTintColor) {
+    _cachedTintColor = tintColor;
+  } else {
+    _cachedTintColor = nil;
+  }
   return [[ASTextNodeDrawParameter alloc] initWithRendererAttributes:[self _locked_rendererAttributes]
                                                      backgroundColor:self.backgroundColor
                                                  textContainerInsets:_textContainerInset
                                                         contentScale:_contentsScaleForDisplay
                                                               opaque:self.isOpaque
-                                                              bounds:[self threadSafeBounds]];
+                                                              bounds:[self threadSafeBounds]
+                                                     traitCollection:self.primitiveTraitCollection
+                          willDisplayNodeContentWithRenderingContext:self.willDisplayNodeContentWithRenderingContext
+                           didDisplayNodeContentWithRenderingContext:self.didDisplayNodeContentWithRenderingContext];
 }
 
 + (UIImage *)displayWithParameters:(id<NSObject>)parameters isCancelled:(NS_NOESCAPE asdisplaynode_iscancelled_block_t)isCancelled
@@ -563,12 +599,19 @@ static NSArray *DefaultLinkAttributeNames() {
   UIColor *backgroundColor = drawParameter->_backgroundColor;
   UIEdgeInsets textContainerInsets = drawParameter ? drawParameter->_textContainerInsets : UIEdgeInsetsZero;
   ASTextKitRenderer *renderer = [drawParameter rendererForBounds:drawParameter->_bounds];
+  ASDisplayNodeContextModifier willDisplayNodeContentWithRenderingContext = drawParameter->_willDisplayNodeContentWithRenderingContext;
+  ASDisplayNodeContextModifier didDisplayNodeContentWithRenderingContext  = drawParameter->_didDisplayNodeContentWithRenderingContext;
 
-  UIImage *result = ASGraphicsCreateImageWithOptions(CGSizeMake(drawParameter->_bounds.size.width, drawParameter->_bounds.size.height), drawParameter->_opaque, drawParameter->_contentScale, nil, nil, ^{
+  UIImage *result = ASGraphicsCreateImage(drawParameter->_traitCollection, CGSizeMake(drawParameter->_bounds.size.width, drawParameter->_bounds.size.height), drawParameter->_opaque, drawParameter->_contentScale, nil, nil, ^{
     CGContextRef context = UIGraphicsGetCurrentContext();
     ASDisplayNodeAssert(context, @"This is no good without a context.");
     
     CGContextSaveGState(context);
+    
+    if (context && willDisplayNodeContentWithRenderingContext) {
+      willDisplayNodeContentWithRenderingContext(context, drawParameter);
+    }
+      
     CGContextTranslateCTM(context, textContainerInsets.left, textContainerInsets.top);
     
     // Fill background
@@ -580,6 +623,11 @@ static NSArray *DefaultLinkAttributeNames() {
 
     // Draw text
     [renderer drawInContext:context bounds:drawParameter->_bounds];
+    
+    if (context && didDisplayNodeContentWithRenderingContext) {
+      didDisplayNodeContentWithRenderingContext(context, drawParameter);
+    }
+    
     CGContextRestoreGState(context);
   });
 
@@ -943,6 +991,39 @@ static CGRect ASTextNodeAdjustRenderRectForShadowPadding(CGRect rendererRect, UI
   
   CGRect frame = [[self _locked_renderer] frameForTextRange:textRange];
   return ASTextNodeAdjustRenderRectForShadowPadding(frame, self.shadowPadding);
+}
+
+#pragma mark - Tint Colors
+
+
+- (void)tintColorDidChange
+{
+  [super tintColorDidChange];
+
+  [self _setNeedsDisplayOnTintedTextColor];
+}
+
+- (void)_setNeedsDisplayOnTintedTextColor
+{
+  BOOL textColorFollowsTintColor = NO;
+  {
+    AS::MutexLocker l(__instanceLock__);
+    textColorFollowsTintColor = _textColorFollowsTintColor;
+  }
+
+  if (textColorFollowsTintColor) {
+    [self setNeedsDisplay];
+  }
+}
+
+
+#pragma mark Interface State
+
+- (void)didEnterHierarchy
+{
+  [super didEnterHierarchy];
+
+  [self _setNeedsDisplayOnTintedTextColor];
 }
 
 #pragma mark - Placeholders
@@ -1309,6 +1390,11 @@ static NSAttributedString *DefaultTruncationAttributedString()
 - (NSUInteger)lineCount
 {
   return ASLockedSelf([[self _locked_renderer] lineCount]);
+}
+
+- (BOOL)textColorFollowsTintColor
+{
+  return ASLockedSelf(_textColorFollowsTintColor);
 }
 
 #pragma mark - Truncation Message

@@ -209,7 +209,7 @@ using AS::MutexLocker;
     displayBlock = ^id{
       CHECK_CANCELLED_AND_RETURN_NIL();
 
-      UIImage *image = ASGraphicsCreateImageWithOptions(bounds.size, opaque, contentsScaleForDisplay, nil, isCancelledBlock, ^{
+      UIImage *image = ASGraphicsCreateImage(self.primitiveTraitCollection, bounds.size, opaque, contentsScaleForDisplay, nil, isCancelledBlock, ^{
         for (dispatch_block_t block in displayBlocks) {
           if (isCancelledBlock()) return;
           block();
@@ -247,7 +247,7 @@ using AS::MutexLocker;
       };
 
       if (shouldCreateGraphicsContext) {
-        return ASGraphicsCreateImageWithOptions(bounds.size, opaque, contentsScaleForDisplay, nil, isCancelledBlock, workWithContext);
+        return ASGraphicsCreateImage(self.primitiveTraitCollection, bounds.size, opaque, contentsScaleForDisplay, nil, isCancelledBlock, workWithContext);
       } else {
         workWithContext();
         return image;
@@ -260,7 +260,7 @@ using AS::MutexLocker;
    Color the interval red if cancelled, green otherwise.
    */
 #if AS_SIGNPOST_ENABLE
-  __unsafe_unretained id ptrSelf = (id)self;
+  unowned id ptrSelf = (id)self;
   displayBlock = ^{
     ASSignpostStart(LayerDisplay, ptrSelf, "%@", ASObjectDescriptionMakeTiny(ptrSelf));
     id result = displayBlock();
@@ -485,7 +485,7 @@ using AS::MutexLocker;
   _willDisplayNodeContentWithRenderingContext = contextModifier;
 }
 
-- (void)setDidDisplayNodeContentWithRenderingContext:(ASDisplayNodeContextModifier)contextModifier;
+- (void)setDidDisplayNodeContentWithRenderingContext:(ASDisplayNodeContextModifier)contextModifier
 {
   MutexLocker l(__instanceLock__);
   _didDisplayNodeContentWithRenderingContext = contextModifier;

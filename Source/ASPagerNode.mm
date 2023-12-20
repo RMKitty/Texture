@@ -17,6 +17,7 @@
 #import <AsyncDisplayKit/ASPagerFlowLayout.h>
 #import <AsyncDisplayKit/ASCellNode.h>
 #import <AsyncDisplayKit/UIResponder+AsyncDisplayKit.h>
+#import <AsyncDisplayKit/ASCollectionView+Undeprecated.h>
 
 @interface ASPagerNode () <ASCollectionDataSource, ASCollectionDelegate, ASCollectionDelegateFlowLayout, ASDelegateProxyInterceptor, ASCollectionGalleryLayoutPropertiesProviding>
 {
@@ -50,7 +51,7 @@
   return [self initWithCollectionViewLayout:flowLayout];
 }
 
-- (instancetype)initWithCollectionViewLayout:(ASPagerFlowLayout *)flowLayout;
+- (instancetype)initWithCollectionViewLayout:(ASPagerFlowLayout *)flowLayout
 {
   ASDisplayNodeAssert([flowLayout isKindOfClass:[ASPagerFlowLayout class]], @"ASPagerNode requires a flow layout.");
   ASDisplayNodeAssertTrue(flowLayout.scrollDirection == UICollectionViewScrollDirectionHorizontal);
